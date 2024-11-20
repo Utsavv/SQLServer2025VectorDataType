@@ -1,0 +1,1 @@
+# SQLServer2025VectorDataType
