@@ -1,0 +1,2 @@
+you might need to download odbc 18 to support vector data type
+https://learn.microsoft.com/en-us/sql/connect/odbc/download-odbc-driver-for-sql-server?view=sql-server-ver16

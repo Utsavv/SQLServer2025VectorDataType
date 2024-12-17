@@ -1,6 +1,7 @@
 import pyodbc
 from sentence_transformers import SentenceTransformer
 import json
+import numpy as np
 from dotenv import load_dotenv
 import os
 
@@ -13,6 +14,10 @@ database = os.getenv('DATABASE')
 username = os.getenv('USERNAME')
 password = os.getenv('PASSWORD')
 driver = '{ODBC Driver 18 for SQL Server}'
+
+# Cosine similarity function
+def cosine_similarity(vec1, vec2):
+    return np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2))
 
 # Connect to Azure SQL Server
 def connect_to_db():
@@ -79,6 +84,55 @@ def insert_data(connection, embeddings_data):
     except Exception as e:
         print(f"Error inserting data: {e}")
 
+# Fetch all embeddings from the database
+def fetch_embeddings(connection):
+    try:
+        cursor = connection.cursor()
+        cursor.execute("SELECT DocumentText, Embedding FROM VectorStagingTable")
+        rows = cursor.fetchall()
+        
+        # Parse embeddings from JSON strings
+        embeddings_data = []
+        for row in rows:
+            document_text = row[0]
+            embedding = json.loads(row[1])  # Convert stored JSON to a list
+            embeddings_data.append((document_text, embedding))
+        print("Embeddings fetched from the database.")
+        return embeddings_data
+    except Exception as e:
+        print(f"Error fetching embeddings: {e}")
+        return []
+
+# Search for similar texts
+def search_similar_texts(query_text, top_n=3):
+    # Load the model
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+
+    # Generate embedding for the query text
+    query_embedding = model.encode(query_text).tolist()
+    print("Query embedding generated.")
+
+    # Connect to the database
+    connection = connect_to_db()
+    if connection is None:
+        return
+
+    # Fetch stored embeddings
+    stored_data = fetch_embeddings(connection)
+    connection.close()
+
+    # Calculate cosine similarity
+    similarities = []
+    for document_text, embedding in stored_data:
+        similarity = cosine_similarity(query_embedding, embedding)
+        similarities.append((document_text, similarity))
+
+    # Sort by similarity and return top N results
+    similarities = sorted(similarities, key=lambda x: x[1], reverse=True)
+    print(f"\nTop {top_n} most similar results:")
+    for i, (text, sim) in enumerate(similarities[:top_n]):
+        print(f"{i+1}. Similarity: {sim:.4f} | Text: {text}")
+
 # Main function
 def main():
     # Connect to the database
@@ -105,6 +159,10 @@ def main():
     # Close the connection
     connection.close()
     print("Connection closed!")
+
+    # Search for similar texts
+    query_text = input("\nEnter a query text to search: ")
+    search_similar_texts(query_text, top_n=3)
 
 if __name__ == "__main__":
     main()
