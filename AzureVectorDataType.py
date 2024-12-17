@@ -12,7 +12,7 @@ server = os.getenv('SERVER')
 database = os.getenv('DATABASE')
 username = os.getenv('USERNAME')
 password = os.getenv('PASSWORD')
-driver = '{ODBC Driver 17 for SQL Server}'
+driver = '{ODBC Driver 18 for SQL Server}'
 
 # Connect to Azure SQL Server
 def connect_to_db():
@@ -26,53 +26,58 @@ def connect_to_db():
         print("Error connecting to database:", e)
         return None
 
-# Create the Vectors table
+# Create the table to store embeddings
 def create_table(connection):
     try:
         cursor = connection.cursor()
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS VectorDB (
+            DROP TABLE IF EXISTS VectorStagingTable;
+            CREATE TABLE VectorStagingTable(
                 Id INT IDENTITY(1,1) PRIMARY KEY,
                 DocumentText NVARCHAR(MAX),
-                Embedding VECTOR(768) -- Adjust dimension based on model output
-            )
+                Embedding NVARCHAR(MAX)
+            );
         """)
         connection.commit()
         print("Table created successfully!")
     except Exception as e:
         print("Error creating table:", e)
 
-# Generate embeddings from a document
-def generate_embeddings(file_path):
+# Generate embeddings for each line of the file
+def generate_embeddings_per_line(file_path, model):
     try:
-        # Load a pre-trained Sentence Transformer model
-        model = SentenceTransformer('all-MiniLM-L6-v2')  # You can use other models if preferred
-
-        # Read document
+        embeddings_data = []
+        # Read the file line by line
         with open(file_path, 'r', encoding='utf-8') as file:
-            document_text = file.read()
+            lines = file.readlines()
         
-        # Generate embeddings
-        embeddings = model.encode([document_text])
-        print("Embeddings generated successfully!")
-        return document_text, embeddings[0].tolist()
+        # Generate embeddings for each line
+        for line in lines:
+            line = line.strip()
+            if line:  # Skip empty lines
+                embedding = model.encode(line).tolist()
+                embeddings_data.append((line, embedding))
+        
+        print("Embeddings generated for all lines!")
+        return embeddings_data
     except Exception as e:
-        print("Error generating embeddings:", e)
-        return None, None
+        print(f"Error generating embeddings: {e}")
+        return []
 
 # Insert data into the table
-def insert_data(connection, document_text, embedding):
+def insert_data(connection, embeddings_data):
     try:
         cursor = connection.cursor()
-        embedding_json = json.dumps(embedding)  # Convert the embedding to a JSON format
-        cursor.execute("""
-            INSERT INTO VectorDB (DocumentText, Embedding)
-            VALUES (?, ?)
-        """, document_text, embedding_json)
+        for document_text, embedding in embeddings_data:
+            embedding_json = json.dumps(embedding)  # Convert embedding to JSON string
+            cursor.execute("""
+                INSERT INTO VectorStagingTable (DocumentText, Embedding)
+                VALUES (?, ?)
+            """, document_text, embedding_json)
         connection.commit()
-        print("Data inserted successfully!")
+        print("All data inserted successfully!")
     except Exception as e:
-        print("Error inserting data:", e)
+        print(f"Error inserting data: {e}")
 
 # Main function
 def main():
@@ -81,16 +86,21 @@ def main():
     if connection is None:
         return
     
-    # Create the VectorDB table
+    # Create the VectorStagingTable table
     create_table(connection)
     
-    # Generate embeddings from the document
-    document_text, embedding = generate_embeddings('Documentation.txt')
-    if document_text is None or embedding is None:
+    # Load the model
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+    
+    # Generate embeddings per line from the document
+    embeddings_data = generate_embeddings_per_line('Documentation.txt', model)
+    if not embeddings_data:
+        print("No embeddings generated. Exiting.")
+        connection.close()
         return
-
+    
     # Insert embeddings into the database
-    insert_data(connection, document_text, embedding)
+    insert_data(connection, embeddings_data)
 
     # Close the connection
     connection.close()
