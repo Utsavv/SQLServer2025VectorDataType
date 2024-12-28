@@ -44,7 +44,7 @@ def create_table(connection):
         print("Error creating table:", e)
 
 # Generate embeddings for each line of the input (file or text)
-def generate_embeddings(input_data):
+def generate_embeddings(input_data, append_data=True):
     """
     Generate embeddings for each line of the input, which can be either a file path or a text string.
     
@@ -75,7 +75,10 @@ def generate_embeddings(input_data):
             line = line.strip()
             if line:  # Skip empty lines
                 embedding = model.encode(line).tolist()
-                embeddings_data.append((line, embedding))
+                if append_data == True:
+                    embeddings_data.append((line, embedding))
+                else: 
+                    embeddings_data=embedding
         
         print("Embeddings generated for all lines!")
         return embeddings_data
@@ -106,7 +109,7 @@ def vector_search_sql(query, conn, num_results=5):
     cursor = conn.cursor()
 
     # Generate the query embedding for the user's search query
-    user_query_embedding = generate_embeddings(query)
+    user_query_embedding = generate_embeddings(query,False)
     
     # SQL query for similarity search using the function vector_distance to calculate cosine similarity
     sql_similarity_search = f"""
@@ -116,12 +119,13 @@ def vector_search_sql(query, conn, num_results=5):
     FROM dbo.VectorDB
     ORDER BY distance_score 
     """
-
-    cursor.execute(sql_similarity_search, num_results, json.dumps(user_query_embedding), json.dumps(user_query_embedding))
+    
+    # Print the JSON results
+    json_results = json.dumps(user_query_embedding)
+    
+    #Execute Query
+    cursor.execute(sql_similarity_search, num_results, json_results, json_results)
     results = cursor.fetchall()
-
-    # Close the database connection
-    conn.close()
 
     return results
     
@@ -148,11 +152,28 @@ def main():
     # Insert embeddings into the database
     insert_data(connection, embeddings_data)
     
-    #example usage
-    vector_search_sql("How can you manage and simplify multiple conditions together in the Rule Engine for complex scenarios like promotions?", connection, num_results=3)
+    queries = [
+        "How can you manage and simplify multiple conditions together in the Rule Engine for complex scenarios like promotions?",
+        "When might you use the 'Container' condition in the Rule Engine, and what advantage does it provide?",
+        "How does the 'Group' condition enhance flexibility when working with conditions in the Rule Engine?"
+    ]  
+
+    # Print results for each query   
+    for query in queries:
+        print(f"\n\n\nQuery: {query}")
+        results=vector_search_sql(query, connection, num_results=3)
+        # Print the results
+        if results:
+            print("Search Results:")
+            for row in results:
+                print(f"\n\nDocumentText: {row[0]}, SimilarityScore: {row[1]}, DistanceScore: {row[2]}")
+        else:
+            print("No results found.")
 
     # Close the connection
-    connection.close()
+    if connection and not connection.closed:
+        connection.close()
+        
     print("Connection closed!")
 
 if __name__ == "__main__":
